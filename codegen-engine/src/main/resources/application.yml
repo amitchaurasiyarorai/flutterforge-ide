@@ -1,0 +1,27 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: flutterforge-codegen-engine
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      indent-output: true
+
+anthropic:
+  api-key: ${ANTHROPIC_API_KEY:your-api-key-here}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.flutterforge: DEBUG
+    root: INFO

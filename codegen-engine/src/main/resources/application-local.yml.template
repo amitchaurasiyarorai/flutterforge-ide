@@ -1,0 +1,16 @@
+# ─────────────────────────────────────────────────────────
+# LOCAL DEVELOPER CONFIG — DO NOT COMMIT THIS FILE
+# Copy this file, rename to application-local.yml
+# and fill in your own values
+# ─────────────────────────────────────────────────────────
+
+anthropic:
+  api:
+    key: YOUR_ANTHROPIC_API_KEY_HERE   # get from console.anthropic.com
+
+server:
+  port: 9876
+
+logging:
+  level:
+    com.flutterforge: DEBUG
