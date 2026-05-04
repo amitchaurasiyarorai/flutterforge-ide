@@ -1,0 +1,43 @@
+server:
+  port: 8080
+  netty:
+    max-initial-line-length: 65536
+
+spring:
+  application:
+    name: flutterforge-codegen-engine
+  profiles:
+    active: local
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      indent-output: true
+  codec:
+    # Default is 256KB — build payloads (project JSON + all screens) can exceed this.
+    # HTTP 400/430 means this limit was hit. Raised to 50MB for large projects.
+    max-in-memory-size: 52428800   # 50 MB
+  webflux:
+    multipart:
+      max-request-size: 52428800
+  mvc:
+    async:
+      request-timeout: -1   # no timeout — APK builds take 5-10 min
+
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.flutterforge: DEBUG
+    root: INFO
+
+gg:
+  jte:
+    development-mode: true
