@@ -10,7 +10,18 @@ anthropic:
 
 server:
   port: 9876
+  netty:
+    max-initial-line-length: 65536
+
+spring:
+  codec:
+    max-in-memory-size: 52428800   # 50 MB — fixes HTTP 430 on large project build payloads
+  mvc:
+    async:
+      # -1 = no timeout — build can take 5-10 min for first APK (Gradle download)
+      request-timeout: -1
 
 logging:
   level:
-    com.flutterforge: DEBUG
+    org.springframework.web.reactive.function.client: DEBUG
+    reactor.netty.http.client: DEBUG

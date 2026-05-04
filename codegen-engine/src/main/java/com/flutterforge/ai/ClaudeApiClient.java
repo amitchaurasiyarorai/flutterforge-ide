@@ -9,193 +9,238 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
 import java.util.*;
 import java.util.function.Consumer;
 
-/**
- * FlutterForge — Claude API Client
- *
- * Handles all communication with the Anthropic Claude API.
- * Supports both streaming (SSE) and blocking calls.
- *
- * Model routing:
- *   claude-sonnet-4-6  → screen gen, service scaffold, code review (quality tasks)
- *   claude-haiku-4-5   → autocomplete, widget hints, quick explain (latency tasks)
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ClaudeApiClient {
 
-    private static final String ANTHROPIC_API_URL = "https://api.anthropic.com";
-    private static final String API_VERSION       = "2023-06-01";
-    private static final String MODEL_QUALITY     = "claude-sonnet-4-6";
-    private static final String MODEL_FAST        = "claude-haiku-4-5-20251001";
-    private static final int    MAX_TOKENS        = 8192;
-    private static final int    MAX_TOKENS_FAST   = 2048;
+    private static final String API_URL      = "https://api.anthropic.com/v1/messages";
+    private static final String API_VERSION  = "2023-06-01";
+    private static final String MODEL_SONNET = "claude-sonnet-4-6";
+    private static final String MODEL_HAIKU  = "claude-haiku-4-5-20251001";
 
     @Value("${anthropic.api.key}")
     private String apiKey;
 
-    private final WebClient webClient;
+    private final WebClient    webClient;
     private final ObjectMapper objectMapper;
     private final PromptLibrary promptLibrary;
 
-    // ────────────────────────────────────────────────────────
-    // PUBLIC API — QUALITY (Sonnet)
-    // ────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────
+    // PUBLIC STREAMING API
+    // These return Flux<String> — each emitted String is one
+    // text token from Claude, to be forwarded as SSE to client.
+    // ─────────────────────────────────────────────────────
 
-    /**
-     * Generate a Flutter screen widget tree from natural language description.
-     * Streams tokens back via onToken callback for live IDE preview.
-     *
-     * @param description  "A login screen with email, password fields and a submit button"
-     * @param projectContext  serialised relevant project state (current theme, existing screens)
-     * @param onToken    callback fired for each streaming token
-     * @return complete generated JSON string
-     */
-    public Mono<String> generateScreen(String description,
-                                        String projectContext,
-                                        Consumer<String> onToken) {
-        String systemPrompt = promptLibrary.getScreenGenerationPrompt();
-        String userMessage  = buildScreenGenMessage(description, projectContext);
-        return streamCompletion(systemPrompt, userMessage, MODEL_QUALITY, MAX_TOKENS, onToken);
+    public Flux<String> chatStream(List<ChatMessage> history, String ctx) {
+        String system  = promptLibrary.getCopilotSystemPrompt(ctx);
+        List<Map<String, Object>> msgs = cleanMessages(toMsgList(history));
+        return streamFlux(system, msgs, MODEL_SONNET, 4096);
     }
 
-    /**
-     * Generate a complete microservice definition from natural language.
-     *
-     * @param description  "Auth service with JWT, refresh tokens, Google OAuth"
-     * @param graphContext  existing service graph JSON (to avoid duplicates)
-     * @param onToken  streaming callback
-     */
-    public Mono<String> generateMicroservice(String description,
-                                              String graphContext,
-                                              Consumer<String> onToken) {
-        String systemPrompt = promptLibrary.getMicroserviceGenerationPrompt();
-        String userMessage  = buildServiceGenMessage(description, graphContext);
-        return streamCompletion(systemPrompt, userMessage, MODEL_QUALITY, MAX_TOKENS, onToken);
-    }
-
-    /**
-     * Review generated Dart code for issues (null safety, lifecycle, perf).
-     *
-     * @param dartCode  generated Dart source
-     * @return ReviewResult with issues and fixes
-     */
-    public Mono<String> reviewCode(String dartCode) {
-        String systemPrompt = promptLibrary.getCodeReviewPrompt();
-        String userMessage  = "Review this generated Flutter/Dart code:\n\n```dart\n" + dartCode + "\n```";
-        return blockingCompletion(systemPrompt, userMessage, MODEL_QUALITY, MAX_TOKENS);
-    }
-
-    /**
-     * Generate widget tests + integration tests for a screen.
-     */
-    public Mono<String> generateTests(String dartCode, String screenName) {
-        String systemPrompt = promptLibrary.getTestGenerationPrompt();
-        String userMessage  = "Generate Flutter widget tests for screen: " + screenName
-                            + "\n\nSource:\n```dart\n" + dartCode + "\n```";
-        return blockingCompletion(systemPrompt, userMessage, MODEL_QUALITY, MAX_TOKENS);
-    }
-
-    /**
-     * Copilot chat — context-aware conversation with project knowledge.
-     *
-     * @param conversationHistory  full message history [{role, content}]
-     * @param projectContext       current project state summary
-     * @param onToken              streaming callback for live display
-     */
-    public Mono<String> chat(List<ChatMessage> conversationHistory,
-                              String projectContext,
-                              Consumer<String> onToken) {
-        String systemPrompt = promptLibrary.getCopilotSystemPrompt(projectContext);
-        return streamWithHistory(systemPrompt, conversationHistory, MODEL_QUALITY, MAX_TOKENS, onToken);
-    }
-
-    // ────────────────────────────────────────────────────────
-    // PUBLIC API — FAST (Haiku)
-    // ────────────────────────────────────────────────────────
-
-    /**
-     * Suggest next widget based on current canvas context.
-     * Uses Haiku for low-latency response (<500ms target).
-     *
-     * @param currentWidgetType  type of widget being placed
-     * @param parentWidgetType   parent container type
-     * @param screenContext      brief screen description
-     * @return list of suggested widget types
-     */
-    public Mono<String> suggestNextWidget(String currentWidgetType,
-                                           String parentWidgetType,
-                                           String screenContext) {
-        String systemPrompt = promptLibrary.getWidgetSuggestionPrompt();
-        String userMessage  = "Current: " + currentWidgetType
-                            + "\nParent: " + parentWidgetType
-                            + "\nScreen: " + screenContext
-                            + "\nSuggest 5 next widgets as JSON array.";
-        return blockingCompletion(systemPrompt, userMessage, MODEL_FAST, MAX_TOKENS_FAST);
-    }
-
-    /**
-     * Explain a generated code block inline.
-     */
-    public Mono<String> explainCode(String codeSnippet) {
-        String systemPrompt = "You are a Flutter expert. Explain code briefly in 2-3 sentences. Plain text, no markdown.";
-        String userMessage  = "Explain: ```dart\n" + codeSnippet + "\n```";
-        return blockingCompletion(systemPrompt, userMessage, MODEL_FAST, MAX_TOKENS_FAST);
-    }
-
-    /**
-     * Autocomplete widget properties based on partial JSON.
-     */
-    public Mono<String> autocompleteProps(String widgetType, String partialProps) {
-        String systemPrompt = promptLibrary.getPropAutocompletePrompt();
-        String userMessage  = "Widget: " + widgetType
-                            + "\nPartial props: " + partialProps
-                            + "\nComplete the props JSON object.";
-        return blockingCompletion(systemPrompt, userMessage, MODEL_FAST, MAX_TOKENS_FAST);
-    }
-
-    // ────────────────────────────────────────────────────────
-    // CORE HTTP LAYER
-    // ────────────────────────────────────────────────────────
-
-    /**
-     * Stream a completion — fires onToken for each text delta.
-     * Returns Mono<String> of the complete response when done.
-     */
-    private Mono<String> streamCompletion(String systemPrompt,
-                                           String userMessage,
-                                           String model,
-                                           int maxTokens,
-                                           Consumer<String> onToken) {
-        Map<String, Object> body = buildRequestBody(
-                systemPrompt,
-                List.of(Map.of("role", "user", "content", userMessage)),
-                model, maxTokens, true
+    public Flux<String> generateScreenStream(String description, String ctx) {
+        return streamFlux(
+            promptLibrary.getScreenGenerationPrompt(),
+            List.of(msg("user", "Generate screen for: " + description + "\n\nProject:\n" + ctx)),
+            MODEL_SONNET, 8192
         );
+    }
 
-        StringBuilder fullResponse = new StringBuilder();
+    /**
+     * Vision: generate a Flutter screen widget tree from a screenshot image.
+     * The image is passed as base64 + mediaType alongside an optional text prompt.
+     */
+    public Flux<String> generateScreenFromImageStream(
+            String base64Image, String mediaType, String description, String ctx) {
+        // Build a multimodal message: image block + text block
+        Map<String, Object> imageSource = new LinkedHashMap<>();
+        imageSource.put("type",       "base64");
+        imageSource.put("media_type", mediaType);
+        imageSource.put("data",       base64Image);
+
+        Map<String, Object> imageBlock = new LinkedHashMap<>();
+        imageBlock.put("type",   "image");
+        imageBlock.put("source", imageSource);
+
+        String textPrompt = "Analyse this UI screenshot and generate a Flutter widget tree that recreates it.\n"
+                + (description != null && !description.isBlank() ? "Additional instructions: " + description + "\n" : "")
+                + "\nProject context:\n" + ctx;
+
+        Map<String, Object> textBlock = new LinkedHashMap<>();
+        textBlock.put("type", "text");
+        textBlock.put("text", textPrompt);
+
+        Map<String, Object> userMsg = new LinkedHashMap<>();
+        userMsg.put("role",    "user");
+        userMsg.put("content", List.of(imageBlock, textBlock));
+
+        return streamFlux(
+            promptLibrary.getScreenGenerationPrompt(),
+            List.of(userMsg),
+            MODEL_SONNET, 8192
+        );
+    }
+
+    public Flux<String> generateMicroserviceStream(String description, String ctx) {
+        return streamFlux(
+            promptLibrary.getMicroserviceGenerationPrompt(),
+            List.of(msg("user", "Generate microservice: " + description + "\n\nExisting:\n" + ctx)),
+            MODEL_SONNET, 8192
+        );
+    }
+
+    public Flux<String> generateCodeStream(String description, String lang,
+                                            String fileContext, String projectContext) {
+        String system = promptLibrary.getCodeGenerationPrompt(lang);
+        String user   = """
+                Generate %s code for the following request:
+
+                REQUEST:
+                %s
+
+                EXISTING FILE CONTEXT (do not repeat, only add new code):
+                ```%s
+                %s
+                ```
+
+                PROJECT CONTEXT:
+                %s
+
+                Return ONLY the new code to add. No explanations. No markdown fences.
+                """.formatted(lang, description, lang, fileContext, projectContext);
+        return streamFlux(system, List.of(msg("user", user)), MODEL_SONNET, 4096);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // PUBLIC BLOCKING API
+    // ─────────────────────────────────────────────────────
+
+    public Mono<String> reviewCode(String code) {
+        return blocking(promptLibrary.getCodeReviewPrompt(),
+                "Review this code:\n```\n" + code + "\n```",
+                MODEL_SONNET, 4096);
+    }
+
+    public Mono<String> generateTests(String code, String screenName) {
+        return blocking(promptLibrary.getTestGenerationPrompt(),
+                "Generate tests for " + screenName + ":\n```\n" + code + "\n```",
+                MODEL_SONNET, 4096);
+    }
+
+    public Mono<String> explainCode(String code) {
+        return blocking(
+                "You are a Flutter/Dart expert. Explain code in 2-3 plain sentences. No markdown.",
+                "Explain:\n```\n" + code + "\n```",
+                MODEL_HAIKU, 512);
+    }
+
+    public Mono<String> suggestNextWidget(String current, String parent, String screen) {
+        return blocking(promptLibrary.getWidgetSuggestionPrompt(),
+                "Current: " + current + "\nParent: " + parent + "\nScreen: " + screen,
+                MODEL_HAIKU, 1024);
+    }
+
+    public Mono<String> autocompleteProps(String widgetType, String partial) {
+        return blocking(promptLibrary.getPropAutocompletePrompt(),
+                "Widget: " + widgetType + "\nPartial: " + partial,
+                MODEL_HAIKU, 512);
+    }
+
+    public Mono<String> autocompleteCode(String currentCode, String lang, String fileContext) {
+        String system = promptLibrary.getCodeAutocompletePrompt(lang);
+        String user   = """
+                Complete the following %s code. Continue from where it ends.
+                FILE PURPOSE: %s
+                CODE:
+                ```%s
+                %s
+                ```
+                Return ONLY the completion. No explanations. No markdown fences.
+                """.formatted(lang, fileContext, lang, currentCode);
+        return blocking(system, user, MODEL_HAIKU, 1024);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // LEGACY: keep Consumer-based signatures for any callers
+    // that haven't been updated yet — they just subscribe.
+    // ─────────────────────────────────────────────────────
+
+    public Mono<String> chat(List<ChatMessage> history, String ctx, Consumer<String> onToken) {
+        StringBuilder full = new StringBuilder();
+        return chatStream(history, ctx)
+                .doOnNext(token -> { full.append(token); if (onToken != null) onToken.accept(token); })
+                .then(Mono.fromCallable(full::toString));
+    }
+
+    public Mono<String> generateScreen(String description, String ctx, Consumer<String> onToken) {
+        StringBuilder full = new StringBuilder();
+        return generateScreenStream(description, ctx)
+                .doOnNext(token -> { full.append(token); if (onToken != null) onToken.accept(token); })
+                .then(Mono.fromCallable(full::toString));
+    }
+
+    public Mono<String> generateMicroservice(String description, String ctx, Consumer<String> onToken) {
+        StringBuilder full = new StringBuilder();
+        return generateMicroserviceStream(description, ctx)
+                .doOnNext(token -> { full.append(token); if (onToken != null) onToken.accept(token); })
+                .then(Mono.fromCallable(full::toString));
+    }
+
+    public Mono<String> generateCode(String description, String lang,
+                                      String fileContext, String projectContext,
+                                      Consumer<String> onToken) {
+        StringBuilder full = new StringBuilder();
+        return generateCodeStream(description, lang, fileContext, projectContext)
+                .doOnNext(token -> { full.append(token); if (onToken != null) onToken.accept(token); })
+                .then(Mono.fromCallable(full::toString));
+    }
+
+    // ─────────────────────────────────────────────────────
+    // CORE: REACTIVE STREAMING — returns Flux<String>
+    // Each emission is one text token from Claude.
+    // This is the FIXED version — no Consumer callback,
+    // pure reactive chain so Spring can flush tokens immediately.
+    // ─────────────────────────────────────────────────────
+
+    private Flux<String> streamFlux(String system,
+                                     List<Map<String, Object>> messages,
+                                     String model, int maxTokens) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model",      model);
+        body.put("max_tokens", maxTokens);
+        body.put("system",     system);
+        body.put("messages",   messages);
+        body.put("stream",     true);
+
+        log.debug("Streaming request: model={} messages={}", model, messages.size());
 
         return webClient.post()
-                .uri(ANTHROPIC_API_URL + "/v1/messages")
-                .header("x-api-key", apiKey)
+                .uri(API_URL)
+                .header("x-api-key",         apiKey)
                 .header("anthropic-version", API_VERSION)
-                .header("Content-Type", "application/json")
+                .header("Content-Type",      "application/json")
+                .header("Accept",            "text/event-stream")
                 .bodyValue(body)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, response ->
                         response.bodyToMono(String.class).flatMap(err -> {
-                            log.error("Claude API error {}: {}", response.statusCode(), err);
-                            return Mono.error(new ClaudeApiException("Claude API error: " + err));
+                            log.error("Claude API {} error: {}", response.statusCode(), err);
+                            return Mono.error(new ClaudeApiException("Claude error: " + err));
                         })
                 )
                 .bodyToFlux(String.class)
-                .filter(line -> line.startsWith("data: ") && !line.equals("data: [DONE]"))
-                .map(line -> line.substring(6))
+                // bodyToFlux(String.class) already strips SSE framing ("data: " prefix)
+                // Each emitted string is the raw JSON event from Anthropic
+                // We just need to filter out non-content events and parse the JSON
+                .map(String::trim)
+                .filter(data -> !data.isEmpty() && data.startsWith("{"))
+                // Parse each SSE event and emit ONLY the text tokens
                 .flatMap(data -> {
                     try {
                         @SuppressWarnings("unchecked")
@@ -206,168 +251,118 @@ public class ClaudeApiClient {
                             Map<String, Object> delta = (Map<String, Object>) event.get("delta");
                             if (delta != null && "text_delta".equals(delta.get("type"))) {
                                 String text = (String) delta.get("text");
-                                if (text != null) {
-                                    fullResponse.append(text);
-                                    if (onToken != null) onToken.accept(text);
+                                if (text != null && !text.isEmpty()) {
+                                    return Flux.just(text);   // ← EMIT token to caller
                                 }
                             }
                         }
-                        return Flux.empty();
+                        return Flux.empty();   // skip non-text events
                     } catch (Exception e) {
-                        log.debug("Could not parse SSE event: {}", data);
+                        log.debug("SSE parse skip: {}", e.getMessage());
                         return Flux.empty();
                     }
                 })
-                .then(Mono.fromCallable(fullResponse::toString))
                 .timeout(Duration.ofSeconds(120))
                 .doOnError(e -> log.error("Stream error: {}", e.getMessage()));
     }
 
-    /**
-     * Non-streaming completion — waits for full response.
-     */
-    private Mono<String> blockingCompletion(String systemPrompt,
-                                             String userMessage,
-                                             String model,
-                                             int maxTokens) {
-        Map<String, Object> body = buildRequestBody(
-                systemPrompt,
-                List.of(Map.of("role", "user", "content", userMessage)),
-                model, maxTokens, false
-        );
+    // ─────────────────────────────────────────────────────
+    // BLOCKING
+    // ─────────────────────────────────────────────────────
+
+    private Mono<String> blocking(String system, String userMessage,
+                                   String model, int maxTokens) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model",      model);
+        body.put("max_tokens", maxTokens);
+        body.put("system",     system);
+        body.put("messages",   List.of(msg("user", userMessage)));
+
+        log.debug("Blocking request: model={}", model);
 
         return webClient.post()
-                .uri(ANTHROPIC_API_URL + "/v1/messages")
-                .header("x-api-key", apiKey)
+                .uri(API_URL)
+                .header("x-api-key",         apiKey)
                 .header("anthropic-version", API_VERSION)
-                .header("Content-Type", "application/json")
+                .header("Content-Type",      "application/json")
                 .bodyValue(body)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, response ->
-                        response.bodyToMono(String.class).flatMap(err ->
-                                Mono.error(new ClaudeApiException("Claude API error: " + err)))
+                        response.bodyToMono(String.class).flatMap(err -> {
+                            log.error("Claude API {} error: {}", response.statusCode(), err);
+                            return Mono.error(new ClaudeApiException("Claude error: " + err));
+                        })
                 )
                 .bodyToMono(String.class)
-                .flatMap(responseBody -> {
+                .flatMap(raw -> {
                     try {
                         @SuppressWarnings("unchecked")
-                        Map<String, Object> parsed = objectMapper.readValue(responseBody, Map.class);
+                        Map<String, Object> parsed = objectMapper.readValue(raw, Map.class);
                         @SuppressWarnings("unchecked")
-                        List<Map<String, Object>> content = (List<Map<String, Object>>) parsed.get("content");
+                        List<Map<String, Object>> content =
+                                (List<Map<String, Object>>) parsed.get("content");
                         if (content != null && !content.isEmpty()) {
-                            String text = (String) content.get(0).get("text");
-                            return Mono.just(text != null ? text : "");
+                            Object text = content.get(0).get("text");
+                            return Mono.just(text != null ? text.toString() : "");
                         }
                         return Mono.just("");
                     } catch (Exception e) {
-                        return Mono.error(new ClaudeApiException("Failed to parse Claude response: " + e.getMessage()));
+                        return Mono.error(new ClaudeApiException("Parse error: " + e.getMessage()));
                     }
                 })
                 .timeout(Duration.ofSeconds(60))
-                .doOnError(e -> log.error("Blocking completion error: {}", e.getMessage()));
+                .doOnError(e -> log.error("Blocking error: {}", e.getMessage()));
     }
 
-    /**
-     * Multi-turn chat with message history.
-     */
-    private Mono<String> streamWithHistory(String systemPrompt,
-                                            List<ChatMessage> history,
-                                            String model,
-                                            int maxTokens,
-                                            Consumer<String> onToken) {
-        List<Map<String, Object>> messages = history.stream()
-                .map(m -> Map.<String, Object>of("role", m.getRole(), "content", m.getContent()))
-                .toList();
+    // ─────────────────────────────────────────────────────
+    // HELPERS
+    // ─────────────────────────────────────────────────────
 
-        Map<String, Object> body = buildRequestBody(systemPrompt, messages, model, maxTokens, true);
-
-        StringBuilder fullResponse = new StringBuilder();
-
-        return webClient.post()
-                .uri(ANTHROPIC_API_URL + "/v1/messages")
-                .header("x-api-key", apiKey)
-                .header("anthropic-version", API_VERSION)
-                .header("Content-Type", "application/json")
-                .bodyValue(body)
-                .retrieve()
-                .bodyToFlux(String.class)
-                .filter(line -> line.startsWith("data: ") && !line.equals("data: [DONE]"))
-                .map(line -> line.substring(6))
-                .flatMap(data -> {
-                    try {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> event = objectMapper.readValue(data, Map.class);
-                        if ("content_block_delta".equals(event.get("type"))) {
-                            @SuppressWarnings("unchecked")
-                            Map<String, Object> delta = (Map<String, Object>) event.get("delta");
-                            if (delta != null) {
-                                String text = (String) delta.get("text");
-                                if (text != null) {
-                                    fullResponse.append(text);
-                                    if (onToken != null) onToken.accept(text);
-                                }
-                            }
-                        }
-                    } catch (Exception ignored) {}
-                    return Flux.empty();
-                })
-                .then(Mono.fromCallable(fullResponse::toString))
-                .timeout(Duration.ofSeconds(120));
+    private static Map<String, Object> msg(String role, String content) {
+        return Map.of("role", role, "content", content);
     }
 
-    // ────────────────────────────────────────────────────────
-    // REQUEST BUILDERS
-    // ────────────────────────────────────────────────────────
-
-    private Map<String, Object> buildRequestBody(String systemPrompt,
-                                                   List<Map<String, Object>> messages,
-                                                   String model,
-                                                   int maxTokens,
-                                                   boolean stream) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", model);
-        body.put("max_tokens", maxTokens);
-        body.put("system", systemPrompt);
-        body.put("messages", messages);
-        if (stream) body.put("stream", true);
-        return body;
+    private static List<Map<String, Object>> toMsgList(List<ChatMessage> history) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (ChatMessage m : history) result.add(msg(m.getRole(), m.getContent()));
+        return result;
     }
 
-    private String buildScreenGenMessage(String description, String projectContext) {
-        return """
-               Generate a Flutter screen widget tree JSON for the following description:
-               
-               DESCRIPTION:
-               %s
-               
-               PROJECT CONTEXT:
-               %s
-               
-               Return ONLY valid JSON matching the ScreenDefinition schema. No markdown, no explanation.
-               """.formatted(description, projectContext);
+    private static List<Map<String, Object>> cleanMessages(List<Map<String, Object>> messages) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        String lastRole = null;
+        for (Map<String, Object> m : messages) {
+            String role = (String) m.get("role");
+            if (role == null) continue;
+            if (role.equals(lastRole)) {
+                if (!result.isEmpty()) {
+                    Map<String, Object> prev = result.get(result.size() - 1);
+                    String merged = prev.get("content") + "\n" + m.get("content");
+                    result.set(result.size() - 1, msg(role, merged));
+                }
+            } else {
+                result.add(m);
+                lastRole = role;
+            }
+        }
+        if (!result.isEmpty() && !"user".equals(result.get(0).get("role"))) result.remove(0);
+        if (result.isEmpty()) result.add(msg("user", "Hello"));
+        return result;
     }
 
-    private String buildServiceGenMessage(String description, String graphContext) {
-        return """
-               Generate a Spring Boot microservice definition JSON for:
-               
-               DESCRIPTION:
-               %s
-               
-               EXISTING SERVICES:
-               %s
-               
-               Return ONLY valid JSON matching the MicroserviceDefinition schema. No markdown, no explanation.
-               """.formatted(description, graphContext);
-    }
-
-    // ────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────
     // VALUE OBJECTS
-    // ────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────
 
-    public record ChatMessage(String role, String content) {
+    public static class ChatMessage {
+        private String role;
+        private String content;
+        public ChatMessage() {}
+        public ChatMessage(String role, String content) { this.role = role; this.content = content; }
         public String getRole()    { return role; }
         public String getContent() { return content; }
+        public void setRole(String role)       { this.role = role; }
+        public void setContent(String content) { this.content = content; }
     }
 
     public static class ClaudeApiException extends RuntimeException {

@@ -24,13 +24,47 @@ public class FlutterForgeProject {
     private String updatedAt;
     private ProjectMetadata metadata;
 
-    @Data @JsonIgnoreProperties(ignoreUnknown = true)
+    @Data
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public static class AppTheme {
+        // -- Seed colors --------------------------------------
         private Map<String, Object> primaryColor;
         private Map<String, Object> secondaryColor;
+        private Map<String, Object> tertiaryColor;
+        private Map<String, Object> errorColor;
+        private Map<String, Object> backgroundColor;
+        private Map<String, Object> surfaceColor;
+        private Map<String, Object> onPrimaryColor;
+        private Map<String, Object> onSecondaryColor;
+        private Map<String, Object> onBackgroundColor;
+        private Map<String, Object> onSurfaceColor;
+        private Map<String, Object> onErrorColor;
+
+        // -- Typography ----------------------------------------
+        private String  fontFamily      = "Roboto";
+        private Integer displayFontSize  = 57;
+        private Integer headlineFontSize = 32;
+        private Integer titleFontSize    = 22;
+        private Integer bodyFontSize     = 14;
+        private Integer labelFontSize    = 12;
+        private Integer fontWeightBold   = 700;
+        private Integer fontWeightNormal = 400;
+
+        // -- Shape ---------------------------------------------
+        private Integer borderRadiusSmall  = 8;
+        private Integer borderRadiusMedium = 12;
+        private Integer borderRadiusLarge  = 28;
+        private Integer borderRadiusFull   = 50;
+
+        // -- Components ----------------------------------------
+        private Integer appBarElevation  = 0;
+        private Integer cardElevation    = 2;
+        private Integer buttonHeight     = 48;
+        private String  inputBorderStyle = "outline";
+
+        // -- Mode ----------------------------------------------
         private boolean useMaterial3 = true;
-        private String brightness = "system";
-        private String fontFamily;
+        private String  brightness   = "system";
     }
 
     @Data @JsonIgnoreProperties(ignoreUnknown = true)

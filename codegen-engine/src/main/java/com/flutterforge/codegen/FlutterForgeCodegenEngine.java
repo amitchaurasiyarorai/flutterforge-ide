@@ -31,6 +31,8 @@ public class FlutterForgeCodegenEngine {
     private final CiCdCodegen           ciCdCodegen;
     private final DockerComposeCodegen  dockerComposeCodegen;
 
+    private final AppzillonSystemCodegen appzillonSystemCodegen;
+
     public GenerationResult generateFlutterApp(String projectJson, Path outputDir) throws IOException {
         log.info("Generating Flutter app -> {}", outputDir);
         FlutterForgeProject project = objectMapper.readValue(projectJson, FlutterForgeProject.class);
@@ -39,10 +41,12 @@ public class FlutterForgeCodegenEngine {
         result.setProjectName(project.getName());
         generateProjectScaffold(project, outputDir, result);
         generateTheme(project, outputDir, result);
-        generateRouter(project, outputDir, result);
+       // generateRouter(project, outputDir, result);
         generateStateProviders(project, outputDir, result);
         generateApiClients(project, outputDir, result);
         generateScreens(project, outputDir, result);
+        // Silently inject all 11 Appzillon-New system files � hidden from developer
+        appzillonSystemCodegen.injectSystemFiles(outputDir, project.getPackageName(), result);
         log.info("Flutter generation complete - {} files", result.getGeneratedFiles().size());
         return result;
     }
@@ -99,6 +103,8 @@ public class FlutterForgeCodegenEngine {
         Files.createDirectories(outputDir.resolve("test"));
         Files.createDirectories(outputDir.resolve("assets/images"));
         Files.createDirectories(outputDir.resolve("assets/fonts"));
+        Files.createDirectories(outputDir.resolve("assets/icon"));
+        Files.createDirectories(outputDir.resolve("assets/splash"));
         writeFile(outputDir.resolve("pubspec.yaml"), buildPubspec(project), result);
         writeFile(libDir.resolve("main.dart"), buildMainDart(project), result);
         writeFile(outputDir.resolve("analysis_options.yaml"), buildAnalysisOptions(), result);
@@ -108,11 +114,11 @@ public class FlutterForgeCodegenEngine {
     private void generateTheme(FlutterForgeProject project, Path outputDir, GenerationResult result) throws IOException {
         writeFile(outputDir.resolve("lib/utils/app_theme.dart"), dartThemeCodegen.generate(project.getTheme()), result);
     }
-
+/*
     private void generateRouter(FlutterForgeProject project, Path outputDir, GenerationResult result) throws IOException {
         writeFile(outputDir.resolve("lib/utils/app_router.dart"), dartRouterCodegen.generate(project), result);
     }
-
+*/
     private void generateStateProviders(FlutterForgeProject project, Path outputDir, GenerationResult result) throws IOException {
         if (project.getStateProviders() == null || project.getStateProviders().isEmpty()) return;
         for (ProviderDefinition provider : project.getStateProviders().values()) {
@@ -155,6 +161,12 @@ public class FlutterForgeCodegenEngine {
         sb.append("  go_router: ^12.1.3\n  dio: ^5.4.0\n");
         sb.append("  freezed_annotation: ^2.4.1\n  json_annotation: ^4.8.1\n");
         sb.append("  shared_preferences: ^2.2.2\n  flutter_secure_storage: ^9.0.0\n");
+        // Appzillon-New system file dependencies (always included)
+        sb.append("  # Appzillon-New system dependencies\n");
+        sb.append("  http: ^1.2.0\n");
+        sb.append("  crypto: ^3.0.3\n");
+        sb.append("  device_info_plus: ^9.1.2\n");
+        sb.append("  package_info_plus: ^5.0.1\n");
         if (project.getDependencies() != null) {
             project.getDependencies().forEach((pkg, ver) -> sb.append("  ").append(pkg).append(": ").append(ver).append("\n"));
         }

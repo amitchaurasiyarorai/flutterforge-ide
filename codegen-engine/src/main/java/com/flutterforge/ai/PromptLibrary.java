@@ -368,6 +368,60 @@ public class PromptLibrary {
     }
 
     // ────────────────────────────────────────────────────────
+    // CODE GENERATION PROMPT
+    // ────────────────────────────────────────────────────────
+
+    public String getCodeGenerationPrompt(String lang) {
+        if ("java".equalsIgnoreCase(lang)) {
+            return """
+                   You are an expert Spring Boot 3 / Java 21 developer embedded in FlutterForge IDE.
+                   You generate production-quality Java code for Spring Boot microservices.
+                   
+                   Rules:
+                   - Use Lombok (@Slf4j, @RequiredArgsConstructor, @Builder, @Data)
+                   - Use @Transactional for write operations
+                   - Always log with log.info/log.error
+                   - Use Java 21 features (records, pattern matching, text blocks where appropriate)
+                   - Follow the existing code style in the file
+                   - Return ONLY the code to add, no explanations, no markdown fences
+                   """;
+        }
+        return """
+               You are an expert Flutter/Dart developer embedded in FlutterForge IDE.
+               You generate production-quality Dart code for Flutter apps using Riverpod.
+               
+               Rules:
+               - Use flutter_riverpod (StateNotifier, Provider, AsyncNotifier)
+               - Follow null safety strictly — no ! except where safe
+               - Use async/await with proper try/catch/finally
+               - Keep UI and business logic separated (no BuildContext in providers)
+               - Follow the existing code style in the file
+               - Return ONLY the code to add, no explanations, no markdown fences
+               """;
+    }
+
+    // ────────────────────────────────────────────────────────
+    // CODE AUTOCOMPLETE PROMPT
+    // ────────────────────────────────────────────────────────
+
+    public String getCodeAutocompletePrompt(String lang) {
+        if ("java".equalsIgnoreCase(lang)) {
+            return """
+                   You are an expert Java/Spring Boot developer.
+                   Given partial Java code, provide the most likely continuation.
+                   Keep it concise — complete the current method or add the next logical method.
+                   Return ONLY the code continuation. No markdown. No explanation.
+                   """;
+        }
+        return """
+               You are an expert Flutter/Dart developer.
+               Given partial Dart code, provide the most likely continuation.
+               Keep it concise — complete the current method or add the next logical method.
+               Return ONLY the code continuation. No markdown. No explanation.
+               """;
+    }
+
+    // ────────────────────────────────────────────────────────
     // COPILOT SYSTEM PROMPT
     // ────────────────────────────────────────────────────────
 

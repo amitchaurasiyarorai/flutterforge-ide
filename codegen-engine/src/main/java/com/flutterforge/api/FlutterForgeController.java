@@ -87,7 +87,7 @@ public class FlutterForgeController {
                     .body(Map.of("success", false, "error", e.getMessage()));
         }
     }
-
+/*
     // ── AI endpoints ─────────────────────────────────────────
 
     @PostMapping(value = "/ai/generate-screen", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -162,4 +162,6 @@ public class FlutterForgeController {
                 .map(ResponseEntity::ok)
                 .onErrorReturn(ResponseEntity.internalServerError().body("[]"));
     }
+
+ */
 }
