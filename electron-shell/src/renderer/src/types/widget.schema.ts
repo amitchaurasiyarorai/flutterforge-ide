@@ -17,40 +17,68 @@ export type WidgetType =
   | 'flutter.widgets.Center'
   | 'flutter.widgets.SizedBox'
   | 'flutter.widgets.Wrap'
+  | 'flutter.widgets.SafeArea'
+  | 'flutter.widgets.SingleChildScrollView'
+  | 'flutter.widgets.AspectRatio'
+  | 'flutter.widgets.Spacer'
   // Display
   | 'flutter.widgets.Text'
+  | 'flutter.widgets.RichText'
   | 'flutter.widgets.Icon'
   | 'flutter.widgets.Image'
   | 'flutter.widgets.Card'
   | 'flutter.widgets.Divider'
   | 'flutter.widgets.CircleAvatar'
+  | 'flutter.widgets.Badge'
+  | 'flutter.widgets.Chip'
+  | 'flutter.widgets.LinearProgressIndicator'
+  | 'flutter.widgets.CircularProgressIndicator'
+  | 'flutter.widgets.Tooltip'
+  | 'flutter.widgets.ClipRRect'
+  | 'flutter.widgets.Opacity'
   // Input
   | 'flutter.widgets.TextField'
+  | 'flutter.widgets.TextFormField'
   | 'flutter.widgets.ElevatedButton'
   | 'flutter.widgets.TextButton'
   | 'flutter.widgets.OutlinedButton'
+  | 'flutter.widgets.FilledButton'
   | 'flutter.widgets.IconButton'
   | 'flutter.widgets.Checkbox'
   | 'flutter.widgets.Switch'
   | 'flutter.widgets.Slider'
+  | 'flutter.widgets.RangeSlider'
   | 'flutter.widgets.DropdownButton'
+  | 'flutter.widgets.DropdownButtonFormField'
+  | 'flutter.widgets.Radio'
+  | 'flutter.widgets.ToggleButtons'
+  | 'flutter.widgets.SearchBar'
+  | 'flutter.widgets.DatePicker'
+  | 'flutter.widgets.TimePicker'
   // Navigation
   | 'flutter.widgets.BottomNavigationBar'
+  | 'flutter.widgets.NavigationBar'
   | 'flutter.widgets.NavigationDrawer'
+  | 'flutter.widgets.NavigationRail'
   | 'flutter.widgets.TabBar'
+  | 'flutter.widgets.TabBarView'
   | 'flutter.widgets.FloatingActionButton'
+  | 'flutter.widgets.PageView'
   // Lists
   | 'flutter.widgets.ListView'
   | 'flutter.widgets.GridView'
   | 'flutter.widgets.ListTile'
+  | 'flutter.widgets.ExpansionTile'
+  | 'flutter.widgets.ReorderableListView'
   // Async
   | 'flutter.widgets.FutureBuilder'
   | 'flutter.widgets.StreamBuilder'
   // Overlay
   | 'flutter.widgets.Dialog'
+  | 'flutter.widgets.AlertDialog'
   | 'flutter.widgets.BottomSheet'
   | 'flutter.widgets.SnackBar'
-
+  | 'flutter.widgets.Stepper'
 // ── Colour ─────────────────────────────────────────────────
 export interface FlutterColor {
   hex: string           // e.g. "#FF5722"
@@ -121,6 +149,19 @@ export type CrossAxisAlignment =
   | 'start'|'end'|'center'|'stretch'|'baseline'
 export type MainAxisSize = 'min'|'max'
 
+// ── API Integration binding (new — from Interfaces tab) ─────
+export interface ApiBinding {
+  interfaceId:   string    // InterfaceDefinition.id
+  fieldPath:     string    // dot-path e.g. "locationName" or "groups[].memberCount"
+  targetProp:    string    // which widget prop receives value e.g. "data", "value"
+  format:        string    // "none"|"currency"|"date"|"percentage"|"uppercase"|"lowercase"|"truncate"|"custom"
+  formatArg?:    string    // for truncate=length, custom=expression
+  visibilityExpr?: string  // e.g. "status == 'ACTIVE'" — evaluates to bool
+  isListBinding?:  boolean // widget is a ListView, binds to array
+  arrayPath?:      string  // for list widgets — path to array in response
+  mockPreview?:    string  // resolved mock value shown in canvas
+}
+
 // ── Service binding ─────────────────────────────────────────
 export interface ServiceBinding {
   serviceId: string          // references ServiceDefinition.id
@@ -145,12 +186,88 @@ export interface NavigationAction {
   arguments?: Record<string, string>
 }
 
-// ── Widget event handlers ───────────────────────────────────
+// ── Action types ─────────────────────────────────────────────
+// Each event on a widget holds an ordered list of WAction items.
+// Actions run top-to-bottom when the event fires.
+
+export type WActionType =
+  | 'navigate'       // go to another screen
+  | 'callApi'        // call an Interface defined in the Interfaces panel
+  | 'showDialog'     // show an AlertDialog
+  | 'showSnackbar'   // show a SnackBar message
+  | 'callCode'       // call a named method in the screen's .dart file
+
+export interface WActionNavigate {
+  type:        'navigate'
+  navType:     'push' | 'pushReplacement' | 'pop' | 'popUntil'
+  screenId?:   string   // target screen id
+  route?:      string   // target route e.g. /dashboard
+  screenName?: string   // display label
+}
+
+export interface WActionCallApi {
+  type:         'callApi'
+  interfaceId:  string   // InterfaceDefinition.id
+  interfaceName?: string // display label
+  loadingVar?:  string   // state variable name for loading indicator
+  onSuccess?:   WActionNavigate | WActionShowSnackbar   // chained action on success
+  onError?:     WActionShowSnackbar                      // chained action on error
+}
+
+export interface WActionShowDialog {
+  type:         'showDialog'
+  title:        string
+  message:      string
+  confirmLabel: string
+  cancelLabel:  string
+  onConfirm?:   WActionNavigate | WActionCallApi         // chained on confirm
+}
+
+export interface WActionShowSnackbar {
+  type:        'showSnackbar'
+  message:     string
+  duration?:   number   // seconds, default 3
+  isError?:    boolean  // red background if true
+}
+
+export interface WActionCallCode {
+  type:        'callCode'
+  methodName:  string   // dart method name e.g. _onLoginPressed
+  // The actual dart code lives in the screen's .dart file, not here
+}
+
+export type WAction =
+  | WActionNavigate
+  | WActionCallApi
+  | WActionShowDialog
+  | WActionShowSnackbar
+  | WActionCallCode
+
+// ── Event trigger types ─────────────────────────────────────
+// Which events a widget exposes depends on its type.
+// The ActionsPanel shows only events relevant to the selected widget.
+
+export type WEventType =
+  | 'onPressed'    // buttons, FAB
+  | 'onTap'        // ListTile, Container/GestureDetector, any tappable
+  | 'onLongPress'  // any tappable
+  | 'onChanged'    // TextField, Switch, Checkbox, Slider
+  | 'onSubmitted'  // TextField — keyboard done/submit
+
+export interface WEventHandler {
+  event:   WEventType
+  actions: WAction[]   // ordered, runs top to bottom
+}
+
+// ── Widget event handlers (replaces old WidgetEvents) ────────
 export interface WidgetEvents {
-  onTap?: ServiceBinding | NavigationAction | { stateAction: string }
-  onChanged?: StateBinding
-  onSubmitted?: ServiceBinding
-  onLongPress?: ServiceBinding | NavigationAction
+  handlers: WEventHandler[]   // list of configured event+action chains
+
+  // Legacy fields kept for backward compatibility
+  onTap?:        ServiceBinding | NavigationAction | { stateAction: string }
+  onChanged?:    StateBinding
+  onSubmitted?:  ServiceBinding
+  onLongPress?:  ServiceBinding | NavigationAction
 }
 
 // ── Canvas position & size ──────────────────────────────────
@@ -353,6 +470,7 @@ export interface WidgetNode {
   geometry?: CanvasGeometry           // position on canvas (root widgets only)
   stateBinding?: StateBinding         // read from Riverpod provider
   serviceBinding?: ServiceBinding     // data fetch binding
+  apiBinding?:     ApiBinding            // API integration binding
   events?: WidgetEvents               // tap/change/submit handlers
   conditionalRender?: string          // bool state ref — hide if false
   repeatFor?: string                  // list state ref — repeat for each item
@@ -380,6 +498,7 @@ export interface ScreenDefinition {
   stateProviders?: string[]           // Riverpod providers used on this screen
   guards?: RouteGuard[]
   transitions?: 'fade'|'slide'|'scale'|'none'
+  navPos?: { x: number; y: number }   // position on navigation designer canvas
 }
 
 export interface RouteGuard {
@@ -391,23 +510,94 @@ export interface RouteGuard {
 
 // ── App-level theme ──────────────────────────────────────────
 export interface AppTheme {
-  primaryColor: FlutterColor
-  secondaryColor?: FlutterColor
-  backgroundColor?: FlutterColor
-  errorColor?: FlutterColor
-  fontFamily?: string
+  // ── Core seed colors ──────────────────────────────
+  primaryColor:    FlutterColor
+  secondaryColor:  FlutterColor
+  tertiaryColor:   FlutterColor
+  errorColor:      FlutterColor
+
+  // ── Surface / background ──────────────────────────
+  backgroundColor: FlutterColor
+  surfaceColor:    FlutterColor
+
+  // ── On-colors (text/icon on each surface) ─────────
+  onPrimaryColor:    FlutterColor
+  onSecondaryColor:  FlutterColor
+  onBackgroundColor: FlutterColor
+  onSurfaceColor:    FlutterColor
+  onErrorColor:      FlutterColor
+
+  // ── Typography ────────────────────────────────────
+  fontFamily:        string          // e.g. "Roboto", "Inter", "Poppins"
+  // Per-role font sizes (Material 3 type scale)
+  displayFontSize:   number          // default 57
+  headlineFontSize:  number          // default 32
+  titleFontSize:     number          // default 22
+  bodyFontSize:      number          // default 14
+  labelFontSize:     number          // default 12
+  fontWeightBold:    number          // default 700
+  fontWeightNormal:  number          // default 400
+
+  // ── Shape ─────────────────────────────────────────
+  borderRadiusSmall:  number         // chips, badges    default 8
+  borderRadiusMedium: number         // cards, inputs    default 12
+  borderRadiusLarge:  number         // dialogs, sheets  default 28
+  borderRadiusFull:   number         // FAB, buttons     default 50
+
+  // ── Component-level overrides ─────────────────────
+  appBarElevation:    number         // default 0
+  cardElevation:      number         // default 2
+  buttonHeight:       number         // default 48
+  inputBorderStyle:   'outline' | 'underline' | 'filled'
+
+  // ── Mode ──────────────────────────────────────────
   useMaterial3: boolean
-  brightness: 'light'|'dark'|'system'
-  colorScheme?: {
-    primary?: FlutterColor
-    onPrimary?: FlutterColor
-    secondary?: FlutterColor
-    surface?: FlutterColor
-    background?: FlutterColor
-  }
+  brightness:   'light' | 'dark' | 'system'
+}
+
+// ── Default theme (Material 3 baseline) ──────────────────────
+export const DEFAULT_THEME: AppTheme = {
+  primaryColor:      { hex: '#6200EA' },
+  secondaryColor:    { hex: '#03DAC6' },
+  tertiaryColor:     { hex: '#EFB8C8' },
+  errorColor:        { hex: '#B00020' },
+  backgroundColor:   { hex: '#FFFBFE' },
+  surfaceColor:      { hex: '#FFFBFE' },
+  onPrimaryColor:    { hex: '#FFFFFF' },
+  onSecondaryColor:  { hex: '#000000' },
+  onBackgroundColor: { hex: '#1C1B1F' },
+  onSurfaceColor:    { hex: '#1C1B1F' },
+  onErrorColor:      { hex: '#FFFFFF' },
+  fontFamily:        'Roboto',
+  displayFontSize:   57,
+  headlineFontSize:  32,
+  titleFontSize:     22,
+  bodyFontSize:      14,
+  labelFontSize:     12,
+  fontWeightBold:    700,
+  fontWeightNormal:  400,
+  borderRadiusSmall:  8,
+  borderRadiusMedium: 12,
+  borderRadiusLarge:  28,
+  borderRadiusFull:   50,
+  appBarElevation:    0,
+  cardElevation:      2,
+  buttonHeight:       48,
+  inputBorderStyle:   'outline',
+  useMaterial3: true,
+  brightness:   'system',
 }
 
 // ── Root project model ───────────────────────────────────────
+// ── Navigation connection (stored at project level) ──────────────────────────
+export interface NavConnection {
+  id:         string
+  fromId:     string   // source screen id
+  toId:       string   // target screen id
+  label?:     string   // e.g. "On Login Success"
+  transition: 'push' | 'pushReplacement' | 'popUntil' | 'go'
+}
+
 export interface FlutterForgeProject {
   id: string
   name: string
@@ -416,6 +606,7 @@ export interface FlutterForgeProject {
   description?: string
   screens: Record<string, ScreenDefinition>
   initialRoute: string
+  navConnections?: NavConnection[]    // navigation flow connections
   theme: AppTheme
   services: Record<string, ServiceDefinition>
   stateProviders: Record<string, ProviderDefinition>

@@ -13,11 +13,19 @@ const fsApi = {
   saveProject:        (json: string, path?: string)   => ipcRenderer.invoke('fs:saveProject', json, path),
   readFile:           (path: string)                  => ipcRenderer.invoke('fs:readFile', path),
   writeFile:          (path: string, content: string) => ipcRenderer.invoke('fs:writeFile', path, content),
-  writeFileBase64:    (path: string, dataUrl: string) => ipcRenderer.invoke('fs:writeFileBase64', path, dataUrl),
-  readFileBase64:     (path: string, mimeType?: string) => ipcRenderer.invoke('fs:readFileBase64', path, mimeType),
   listRecentProjects: ()                              => ipcRenderer.invoke('fs:listRecentProjects'),
   chooseOutputDir:    ()                              => ipcRenderer.invoke('fs:chooseOutputDir'),
   openInExplorer:     (path: string)                  => ipcRenderer.invoke('fs:openInExplorer', path),
+}
+
+// ── Folder-based project API (.appzillon format) ─────────
+const projectApi = {
+  chooseFolder:     ()                  => ipcRenderer.invoke('project:chooseFolder'),
+  chooseSaveFolder: ()                  => ipcRenderer.invoke('project:chooseSaveFolder'),
+  openFolder:       (folderPath: string) => ipcRenderer.invoke('project:openFolder', folderPath),
+  saveFolder:       (req: any)           => ipcRenderer.invoke('project:saveFolder', req),
+  saveScreen:       (req: any)           => ipcRenderer.invoke('project:saveScreen', req),
+  saveAppJson:      (folderPath: string, appJson: any) => ipcRenderer.invoke('project:saveAppJson', folderPath, appJson),
 }
 
 // ── Codegen API ──────────────────────────────────────────
@@ -49,6 +57,20 @@ const aiApi = {
   },
 }
 
+// ── Component Library API ────────────────────────────────
+const componentsApi = {
+  save:   (name: string, json: string)  => ipcRenderer.invoke('components:save', name, json),
+  list:   ()                            => ipcRenderer.invoke('components:list'),
+  delete: (name: string)                => ipcRenderer.invoke('components:delete', name),
+}
+
+// ── Secrets API (OS-encrypted via safeStorage) ───────────
+const secretsApi = {
+  set:    (key: string, value: string) => ipcRenderer.invoke('secrets:set', key, value),
+  get:    (key: string)                => ipcRenderer.invoke('secrets:get', key),
+  delete: (key: string)                => ipcRenderer.invoke('secrets:delete', key),
+}
+
 // ── Platform Info ────────────────────────────────────────
 const platformApi = {
   os:      process.platform,
@@ -57,16 +79,22 @@ const platformApi = {
 
 // ── Expose to renderer ───────────────────────────────────
 contextBridge.exposeInMainWorld('flutterForge', {
-  fs:        fsApi,
-  codegen:   codegenApi,
-  ai:        aiApi,
-  platform:  platformApi,
+  fs:         fsApi,
+  project:    projectApi,
+  codegen:    codegenApi,
+  ai:         aiApi,
+  components: componentsApi,
+  secrets:    secretsApi,
+  platform:   platformApi,
 })
 
 // ── TypeScript type declaration (for renderer) ───────────
 export type FlutterForgeAPI = {
-  fs: typeof fsApi
-  codegen: typeof codegenApi
-  ai: typeof aiApi
-  platform: typeof platformApi
+  fs:         typeof fsApi
+  project:    typeof projectApi
+  codegen:    typeof codegenApi
+  ai:         typeof aiApi
+  components: typeof componentsApi
+  secrets:    typeof secretsApi
+  platform:   typeof platformApi
 }

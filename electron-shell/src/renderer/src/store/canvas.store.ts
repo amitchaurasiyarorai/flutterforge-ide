@@ -53,18 +53,31 @@ export interface CanvasState {
   generationProgress: string
 
   // Actions — Project
-  setProject:       (project: FlutterForgeProject) => void
-  newProject:       (name: string, packageName: string) => void
-  setFilePath:      (path: string) => void
-  markDirty:        () => void
-  markClean:        () => void
+  setProject:         (project: FlutterForgeProject) => void
+  newProject:         (name: string, packageName: string) => void
+  updateProjectMeta:  (meta: { name?: string; packageName?: string; version?: string; description?: string }) => void
+  setFilePath:        (path: string) => void
+  markDirty:          () => void
+  markClean:          () => void
 
   // Actions — Screen
+  updateTheme:      (patch: Partial<import('../types/widget.schema').AppTheme>) => void
   addScreen:        (name: string, route: string) => string
   deleteScreen:     (screenId: string) => void
+  // Asset actions
+  addAsset:         (asset: import('../types/widget.schema').AssetDefinition) => void
+  removeAsset:      (assetId: string) => void
+  updateAsset:      (assetId: string, updates: Partial<import('../types/widget.schema').AssetDefinition>) => void
   setActiveScreen:  (screenId: string) => void
   updateScreen:     (screenId: string, updates: Partial<ScreenDefinition>) => void
   setScreenFromAI:  (screenId: string, screen: ScreenDefinition) => void
+
+  // Actions — Navigation Designer
+  setInitialRoute:      (route: string) => void
+  setScreenNavPos:      (screenId: string, pos: { x: number; y: number }) => void
+  addNavConnection:     (conn: Omit<import('../types/widget.schema').NavConnection, 'id'>) => string
+  updateNavConnection:  (connId: string, updates: Partial<import('../types/widget.schema').NavConnection>) => void
+  removeNavConnection:  (connId: string) => void
 
   // Actions — Widget
   addWidget:        (screenId: string, widget: Omit<WidgetNode, 'id'>, parentId?: string) => string
@@ -152,9 +165,27 @@ function createDefaultProject(name: string, packageName: string): FlutterForgePr
     assets:         [],
     dependencies:   {},
     theme: {
-      primaryColor:  { hex: '#6200EA' },
-      useMaterial3:  true,
-      brightness:    'system',
+      primaryColor:      { hex: '#6200EA' },
+      secondaryColor:    { hex: '#03DAC6' },
+      tertiaryColor:     { hex: '#EFB8C8' },
+      errorColor:        { hex: '#B00020' },
+      backgroundColor:   { hex: '#FFFBFE' },
+      surfaceColor:      { hex: '#FFFBFE' },
+      onPrimaryColor:    { hex: '#FFFFFF' },
+      onSecondaryColor:  { hex: '#000000' },
+      onBackgroundColor: { hex: '#1C1B1F' },
+      onSurfaceColor:    { hex: '#1C1B1F' },
+      onErrorColor:      { hex: '#FFFFFF' },
+      fontFamily: 'Roboto',
+      displayFontSize: 57, headlineFontSize: 32, titleFontSize: 22,
+      bodyFontSize: 14, labelFontSize: 12,
+      fontWeightBold: 700, fontWeightNormal: 400,
+      borderRadiusSmall: 8, borderRadiusMedium: 12,
+      borderRadiusLarge: 28, borderRadiusFull: 50,
+      appBarElevation: 0, cardElevation: 2, buttonHeight: 48,
+      inputBorderStyle: 'outline' as const,
+      useMaterial3: true,
+      brightness: 'system' as const,
     },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -194,6 +225,12 @@ export const useCanvasStore = create<CanvasState>()(
       // ── Project actions ──────────────────────────────
 
       setProject: (project) => set((state) => {
+        // Normalise old project data — ensure every screen has widgets: {}
+        if (project.screens) {
+          for (const sc of Object.values(project.screens)) {
+            if (!sc.widgets) (sc as any).widgets = {}
+          }
+        }
         state.project = project
         state.activeScreenId = Object.keys(project.screens)[0] ?? null
         state.isDirty = false
@@ -213,11 +250,27 @@ export const useCanvasStore = create<CanvasState>()(
         state.historyIndex = -1
       }),
 
-      setFilePath:  (path) => set((state) => { state.projectFilePath = path }),
+      updateProjectMeta: (meta) => set((state) => {
+        if (!state.project) return
+        if (meta.name        !== undefined) state.project.name        = meta.name
+        if (meta.packageName !== undefined) state.project.packageName = meta.packageName
+        if (meta.version     !== undefined) state.project.version     = meta.version
+        if (meta.description !== undefined) state.project.description = meta.description
+        state.isDirty = true
+      }),
+
+      setFilePath:  (path) => set((state) => { state.projectFilePath = path.replace(/\\\\/g, '/') }),
       markDirty:    ()     => set((state) => { state.isDirty = true }),
       markClean:    ()     => set((state) => { state.isDirty = false }),
 
       // ── Screen actions ───────────────────────────────
+
+      updateTheme: (patch) => set((state) => {
+        if (state.project) {
+          state.project.theme = { ...state.project.theme, ...patch }
+          state.isDirty = true
+        }
+      }),
 
       addScreen: (name, route) => {
         const id = 'screen_' + uuidv4().substring(0, 8)
@@ -265,6 +318,26 @@ export const useCanvasStore = create<CanvasState>()(
         state.isDirty = true
       }),
 
+      addAsset: (asset) => set((state) => {
+        if (!state.project) return
+        if (!state.project.assets) state.project.assets = []
+        state.project.assets.push(asset)
+        state.isDirty = true
+      }),
+
+      removeAsset: (assetId) => set((state) => {
+        if (!state.project) return
+        state.project.assets = (state.project.assets || []).filter(a => a.id !== assetId)
+        state.isDirty = true
+      }),
+
+      updateAsset: (assetId, updates) => set((state) => {
+        if (!state.project) return
+        const idx = (state.project.assets || []).findIndex(a => a.id === assetId)
+        if (idx !== -1) Object.assign(state.project.assets![idx], updates)
+        state.isDirty = true
+      }),
+
       setScreenFromAI: (screenId, screen) => set((state) => {
         if (!state.project) return
         state.project.screens[screenId] = screen
@@ -272,20 +345,61 @@ export const useCanvasStore = create<CanvasState>()(
         state.isDirty = true
       }),
 
-      // ── Widget actions ───────────────────────────────
+      // ── Navigation Designer actions ───────────────────
+
+      setInitialRoute: (route) => set((state) => {
+        if (!state.project) return
+        state.project.initialRoute = route
+        state.isDirty = true
+      }),
+
+      setScreenNavPos: (screenId, pos) => set((state) => {
+        if (!state.project?.screens[screenId]) return
+        state.project.screens[screenId].navPos = pos
+        state.isDirty = true
+      }),
+
+      addNavConnection: (conn) => {
+        const id = 'nav_' + Math.random().toString(36).slice(2, 10)
+        set((state) => {
+          if (!state.project) return
+          if (!state.project.navConnections) state.project.navConnections = []
+          state.project.navConnections.push({ ...conn, id })
+          state.isDirty = true
+        })
+        return id
+      },
+
+      updateNavConnection: (connId, updates) => set((state) => {
+        if (!state.project?.navConnections) return
+        const idx = state.project.navConnections.findIndex(c => c.id === connId)
+        if (idx >= 0) {
+          Object.assign(state.project.navConnections[idx], updates)
+          state.isDirty = true
+        }
+      }),
+
+      removeNavConnection: (connId) => set((state) => {
+        if (!state.project?.navConnections) return
+        state.project.navConnections = state.project.navConnections.filter(c => c.id !== connId)
+        state.isDirty = true
+      }),
 
       addWidget: (screenId, widgetDef, parentId) => {
         const id = 'w_' + uuidv4().substring(0, 8)
         set((state) => {
           const screen = state.project?.screens[screenId]
           if (!screen) return
-
+          // Push history before mutation
+          state.history = state.history.slice(0, state.historyIndex + 1)
+          state.history.push({ label: 'Add ' + (widgetDef.type?.split('.').pop() || 'widget'), screens: JSON.parse(JSON.stringify(state.project!.screens)) })
+          if (state.history.length > 50) state.history.shift()
+          state.historyIndex = state.history.length - 1
+          state.canUndo = true; state.canRedo = false
+          // Mutation
           screen.widgets[id] = { ...widgetDef, id } as WidgetNode
-
           if (parentId && screen.widgets[parentId]) {
-            if (!screen.widgets[parentId].children) {
-              screen.widgets[parentId].children = []
-            }
+            if (!screen.widgets[parentId].children) screen.widgets[parentId].children = []
             screen.widgets[parentId].children!.push(id)
           }
           state.isDirty = true
@@ -304,6 +418,11 @@ export const useCanvasStore = create<CanvasState>()(
       deleteWidget: (screenId, widgetId) => set((state) => {
         const screen = state.project?.screens[screenId]
         if (!screen) return
+        state.history = state.history.slice(0, state.historyIndex + 1)
+        state.history.push({ label: 'Delete widget', screens: JSON.parse(JSON.stringify(state.project!.screens)) })
+        if (state.history.length > 50) state.history.shift()
+        state.historyIndex = state.history.length - 1
+        state.canUndo = true; state.canRedo = false
 
         // Remove from parent's children array
         for (const widget of Object.values(screen.widgets)) {
